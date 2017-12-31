@@ -1,0 +1,75 @@
+#!/usr/bin/perl -w
+
+use strict;
+
+if (scalar @ARGV < 1 || $ARGV[0] =~ /^-.+/) {
+	die "Usage: $0 [datafile(s)]\n";
+}
+
+for my $file (@ARGV) {
+	my $fd;
+	if ($file eq '-') {
+		open $fd, '<-'
+			or die "Can't dup stdin: $!";
+	} else {
+		open $fd, '<', $file
+			or die "Can't open $file: $!";
+	}
+
+	while (1) {
+		last unless read_entry($fd);
+	}
+}
+
+exit 0;
+
+sub read_entry {
+	my $fd = shift;
+
+	my $bytes = read($fd, my $hdr, 14);
+	die "Unable to read file: $!" unless defined $bytes;
+	return 0 unless $bytes eq 14;
+	my ($chk, $ts, $klen, $vlen) = unpack("NNnN", $hdr);
+
+	$bytes = read($fd, my $key, $klen);
+	die "Unable to read file: $!" unless defined $bytes;
+	return 0 unless $bytes eq $klen;
+
+	$bytes = read($fd, my $val, $vlen);
+	die "Unable to read file: $!" unless defined $bytes;
+	return 0 unless $bytes eq $vlen;
+
+	decode_key($key);
+	return 1;
+}
+
+sub decode_key {
+	my $bckey = shift;
+
+	# guessing at format from inspection for now
+	my $i = 0;
+	my $hdr1 = substr($bckey, 0+$i, 8); $i += 8;
+	my ($xxx1, $len1) = unpack("NN", $hdr1);
+	if ($xxx1 != 0x8368026d) {
+		warn sprintf("Unknown key value was %x instead of the expected 0x8368026d\n", $xxx1);
+	}
+
+	my $bucket = substr($bckey, 0+$i, $len1); $i += $len1;
+
+	my $xxx2 = substr($bckey, 0+$i, 1);
+	$i += 1;
+	if ($xxx2 ne 'm') {
+		warn sprintf("Unknown key value was %x instead of the expected 0x6d\n", $xxx2);
+	}
+
+	my $hdr2 = substr($bckey, 0+$i, 4); $i += 4;
+	my ($len2) = unpack("N", $hdr2);
+
+	my $key = substr($bckey, 0+$i, $len2); $i += $len2;
+
+	if (length($bckey) != $i) {
+		warn "Key has unexpected size of $i (expected " . length($bckey) . ")\n";
+	}
+
+	print "$bucket $key\n";
+}
